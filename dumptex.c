@@ -1,3 +1,4 @@
+// Entirely written by Gemini because I cba with image stuff
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
