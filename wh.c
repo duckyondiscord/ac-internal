@@ -42,7 +42,7 @@ clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
 renderentities_t renderentities = (renderentities_t)RENDERENTITIES_ADDR; 
 
 // Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work
-#define SIZE_ORIG_BYTES 17 
+#define SIZE_ORIG_BYTES 14 
 static void insertInlineHook(void *origFunc, void *hookFunc) {
 	// unsigned char *bytes = (unsigned char *)origFunc;
 	// printf("First bytes: %02x %02x %02x %02x %02x\n", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]);
