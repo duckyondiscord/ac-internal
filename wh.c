@@ -1,3 +1,11 @@
+/*
+ *	TODO:
+ *	- Get cimgui to display a basic window over the game
+ *	- Disable LODs so chams can work properly at a distance
+ *	- Modify rendering order so that chams render on top(wallhacks!)
+ *	- Add some kind of aimbot/aim assist(ideally silent aim)
+ */
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +16,8 @@
 #include <stdint.h>
 #include <sys/mman.h>
 #include <assert.h>
+#include "lib/ANSI-color-codes.h"
+
 
 // OpenGL Type Definitions
 typedef unsigned int GLenum;
@@ -30,16 +40,13 @@ SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) =
 
 // Hardcoded addresses cuz no PIE
 #define CLIENTLOGF_ADDR 0x44bf10
-#define RENDERENTITIES_ADDR 0x45f870
 
 // Pointer to internal game functions we want to use/hook
 typedef void (*clientlogf_t)(const char *format, ...);
-typedef void (*renderentities_t)(void);
 
 // Define internal game logging function
 // Hardcoded address cuz no PIE
 clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
-renderentities_t renderentities = (renderentities_t)RENDERENTITIES_ADDR; 
 
 // Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work
 #define SIZE_ORIG_BYTES 14 
@@ -134,11 +141,6 @@ bool checkIfEnemy(const void *pixels, GLsizei width, GLsizei height, GLenum form
 	return false;
 }	
 
-void hooked_renderentities(void) {
-	// We do NOT have to call the real renderentities() because unlike LD_PRELOAD hooking, with inline hooking, our code returns to the original function once done.
-	clientlogf("67");
-}
-
 // Hooked OGL function
 void glTexImage2D(GLenum target, int level, int internalformat,
                   GLsizei width, GLsizei height, int border,
@@ -211,12 +213,14 @@ SDL_Window *SDL_CreateWindow(const char* title, int x, int y, int w, int h, Uint
 	}
 }
 
+/*
 __attribute__((constructor))
 void initLib() {
-	hook(renderentities, hooked_renderentities);
+	hook(distlod, hooked_distlod);
 }
 
 __attribute__((destructor))
 void exitLib() {
-	unhook(renderentities);
+	unhook(distlod);
 }
+*/
