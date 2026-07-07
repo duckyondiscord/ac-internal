@@ -16,7 +16,6 @@
 #include <stdint.h>
 #include <sys/mman.h>
 #include <assert.h>
-#include "lib/ANSI-color-codes.h"
 
 
 // OpenGL Type Definitions
