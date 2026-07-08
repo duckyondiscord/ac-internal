@@ -39,13 +39,16 @@ SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) =
 
 // Hardcoded addresses cuz no PIE
 #define CLIENTLOGF_ADDR 0x44bf10
+#define RENDER_WORLD_ADDR 0x51b740
 
 // Pointer to internal game functions we want to use/hook
 typedef void (*clientlogf_t)(const char *format, ...);
+typedef void (*render_world_t)(float param_1, float param_2, float param_3, float param_4, int param_5, int param_6, float param_7, float param_8, int param_9, int param_10);
 
 // Define internal game logging function
 // Hardcoded address cuz no PIE
 clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
+render_world_t render_world = (render_world_t)RENDER_WORLD_ADDR;
 
 // Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work
 #define SIZE_ORIG_BYTES 14 
@@ -85,6 +88,7 @@ void hook(void *origFunc, void *hookFunc) {
     mprotect(getPageAddr(origFunc), getpagesize(),
          PROT_READ | PROT_WRITE | PROT_EXEC);
 
+    // As the function name describes, insert the inline hook
     insertInlineHook(origFunc, hookFunc);
 
     // Make the memory page executable only.
@@ -169,6 +173,7 @@ void glTexImage2D(GLenum target, int level, int internalformat,
 
 				unsigned char *coloredPixels = malloc(size);
 				if (coloredPixels) {
+					// Loop through every pixel and set it to the desired color
 					for(size_t i = 0;i < totalPixels;i++) {
 						size_t offset = i * bpp;
 
@@ -212,14 +217,25 @@ SDL_Window *SDL_CreateWindow(const char* title, int x, int y, int w, int h, Uint
 	}
 }
 
-/*
+// Hooked internal funcs
+void hooked_render_world(float param_1, float param_2, float param_3, float param_4, int param_5, int param_6, float param_7, float param_8, int param_9, int param_10) {
+	clientlogf("[INTERNAL HOOK] render_world() called!");
+	// The following is horrible but I have no better ideas
+	unhook(render_world);
+	render_world(param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10);
+	hook(render_world, hooked_render_world);
+
+}
+
 __attribute__((constructor))
 void initLib() {
-	hook(distlod, hooked_distlod);
+	hook(render_world, hooked_render_world);
 }
 
 __attribute__((destructor))
 void exitLib() {
-	unhook(distlod);
+	unhook(render_world);
 }
-*/
+
+
+
