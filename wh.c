@@ -23,9 +23,18 @@ typedef unsigned int GLenum;
 typedef int GLsizei;
 typedef unsigned int GLuint;
 typedef unsigned char GLubyte;
+typedef bool GLboolean;
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_RGB 0x1907
 #define GL_RGBA 0x1908
+#define GL_NEVER    0x0200
+#define GL_LESS     0x0201
+#define GL_EQUAL    0x0202
+#define GL_LEQUAL   0x0203
+#define GL_GREATER  0x0204
+#define GL_NOTEQUAL 0x0205
+#define GL_GEQUAL   0x0206
+#define GL_ALWAYS   0x0207
 
 // SDL Type Definitions
 typedef uint32_t Uint32;
@@ -34,28 +43,67 @@ typedef struct SDL_Window SDL_Window;
 // Define window handle that we want to maintain
 SDL_Window *windowHandle = NULL;
 
+// Pointers to real OGL functions
+static void (*real_glTexImage2D)(GLenum, int, int, GLsizei, GLsizei, int, GLenum, GLenum, const void*) = NULL;
+void (*real_glDepthFunc)(GLenum) = NULL;
+void (*real_glDepthMask)(GLboolean flag);
+
 // Pointers to real SDL functions
 SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) = NULL;
 
 // Hardcoded addresses cuz no PIE
 #define CLIENTLOGF_ADDR 0x44bf10
-#define RENDER_WORLD_ADDR 0x51b740
+#define ISOCCLUDED_ADDR 0x519b50
+#define RENDERMODEL_ADDR 0x49aa60
+
+// Internal game structs with unknown fields
+typedef struct playerent_t playerent;
+typedef struct modelattach_t modelattach;
+typedef struct vec_t vec;
 
 // Pointer to internal game functions we want to use/hook
 typedef void (*clientlogf_t)(const char *format, ...);
-typedef void (*render_world_t)(float param_1, float param_2, float param_3, float param_4, int param_5, int param_6, float param_7, float param_8, int param_9, int param_10);
+typedef int8_t (*isoccluded_t)(float param_1, float param_2, float param_3, float param_4, float param_5);
+typedef void (*rendermodel_t)(char *param_1, int param_2, int param_3, float param_4, vec *param_5, float param_6,
+			float param_7, float param_8, float param_9, int param_10, playerent *param_11,
+			modelattach *param_12, float param_13);
 
-// Define internal game logging function
-// Hardcoded address cuz no PIE
+// Define internal game functions
+// Hardcoded addresses cuz no PIE
 clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
-render_world_t render_world = (render_world_t)RENDER_WORLD_ADDR;
+isoccluded_t isoccluded = (isoccluded_t)ISOCCLUDED_ADDR;
+rendermodel_t rendermodel = (rendermodel_t)RENDERMODEL_ADDR;
+
+void *getPageAddr(void *addr) {
+    return (void *)((uintptr_t)addr & ~(getpagesize() - 1));
+}
+
+// Runtime patcher, similar to inline hooking code, avoids the need for a patched game binary
+// Also useful for making rust nerds flinch
+bool insertRTPatch(void *location, void *patchCode, size_t patchSize) {
+	// Make location page writable
+	mprotect(getPageAddr(location), getpagesize(), PROT_READ | PROT_WRITE | PROT_EXEC);
+
+	// Write patchCode to location
+	memcpy(location, patchCode, patchSize);
+
+	// Make location page only executable/readable again
+	mprotect(getPageAddr(location), getpagesize(), PROT_READ | PROT_EXEC);
+	unsigned char *bytes = (unsigned char *)location;
+	printf("First byte of overwritten location: %02x (should be 0x90)", bytes[0]);
+
+	if (memcmp(location, patchCode, patchSize) == 0) {
+		return true;
+	}
+
+	return false;
+}
 
 // Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work
-#define SIZE_ORIG_BYTES 14 
+#define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert, 14 bytes equates to a 64-bit long JMP
 static void insertInlineHook(void *origFunc, void *hookFunc) {
 	// unsigned char *bytes = (unsigned char *)origFunc;
-	// printf("First bytes: %02x %02x %02x %02x %02x\n", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]);
-	
+
 	// Write a jump instruction at the start of the original function.
 	*((unsigned char *)origFunc + 0) = 0xFF;
 	*((unsigned char *)origFunc + 1) = 0x25;
@@ -66,16 +114,6 @@ static void insertInlineHook(void *origFunc, void *hookFunc) {
 
 	// Write the hook function address to the jump target
 	*(uint64_t *)((unsigned char *)origFunc + 6) = (uint64_t)hookFunc;
-	
-	// printf("First bytes after hook: %02x %02x %02x %02x %02x\n", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]);
-	
-	//int64_t relativeOffset = (int64_t)((unsigned char *)hookFunc - (unsigned char *)origFunc - 5);
-	//*(int64_t *)((unsigned char *)origFunc + 6) = relativeOffset;
-	// treat this address as a place where a 64-bit integer belongs, then write the integer to it
-}
-
-void *getPageAddr(void *addr) {
-    return (void *)((uintptr_t)addr & ~(getpagesize() - 1));
 }
 
 unsigned char origBytes[SIZE_ORIG_BYTES];
@@ -144,13 +182,36 @@ bool checkIfEnemy(const void *pixels, GLsizei width, GLsizei height, GLenum form
 	return false;
 }	
 
+// Hopefully these will be useful for drawing players over everything
+void glDepthFunc(GLenum func) {
+	if(!real_glDepthFunc) {
+		real_glDepthFunc = dlsym(RTLD_NEXT, "glDepthFunc");
+	}
+	if(real_glDepthFunc) {
+		/*if(func == 513) {
+			real_glDepthFunc(GL_ALWAYS);
+		}
+		else { */
+			real_glDepthFunc(func);
+		//}
+	}
+}
+
+void glDepthMask(GLboolean flag) {
+	if(!real_glDepthMask) {
+		real_glDepthMask = dlsym(RTLD_NEXT, "glDepthMask");
+	}
+	if(real_glDepthMask) {
+		real_glDepthMask(flag);
+	}
+}
+
 // Hooked OGL function
 void glTexImage2D(GLenum target, int level, int internalformat,
                   GLsizei width, GLsizei height, int border,
                   GLenum format, GLenum type, const void *pixels) {
 
 	// Get real function pointer
-	static void (*real_glTexImage2D)(GLenum, int, int, GLsizei, GLsizei, int, GLenum, GLenum, const void*) = NULL;
 	if(!real_glTexImage2D) {
 		real_glTexImage2D = dlsym(RTLD_NEXT, "glTexImage2D");
 	}
@@ -218,24 +279,32 @@ SDL_Window *SDL_CreateWindow(const char* title, int x, int y, int w, int h, Uint
 }
 
 // Hooked internal funcs
-void hooked_render_world(float param_1, float param_2, float param_3, float param_4, int param_5, int param_6, float param_7, float param_8, int param_9, int param_10) {
-	clientlogf("[INTERNAL HOOK] render_world() called!");
-	// The following is horrible but I have no better ideas
-	unhook(render_world);
-	render_world(param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10);
-	hook(render_world, hooked_render_world);
+int8_t hooked_isoccluded(float param_1, float param_2, float param_3, float param_4, float param_5) {
+	// Make the game think nothing is ever occluded so it always renders models behind walls
+	return 0; 
+}
 
+void hooked_rendermodel(char *param_1,int param_2,int param_3,float param_4,vec *param_5,float param_6,
+			float param_7,float param_8,float param_9,int param_10,playerent *param_11,
+			modelattach *param_12,float param_13) {
+	unhook(rendermodel);
+	rendermodel(param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13);
+	hook(rendermodel, hooked_rendermodel);
 }
 
 __attribute__((constructor))
 void initLib() {
-	hook(render_world, hooked_render_world);
+	hook(isoccluded, hooked_isoccluded);
+	hook(rendermodel, hooked_rendermodel);
+	unsigned char* nop_instruction = (unsigned char*)0x90000000;
+	void* patch = &nop_instruction;
+	void* addy = (void*)0x46ce45;
+	insertRTPatch(addy, patch, sizeof(*patch));
+		
 }
 
 __attribute__((destructor))
 void exitLib() {
-	unhook(render_world);
+	unhook(isoccluded);
+	unhook(rendermodel);
 }
-
-
-
