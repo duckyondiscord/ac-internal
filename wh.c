@@ -2,7 +2,7 @@
  *	TODO:
  *	- Get cimgui to display a basic window over the game
  *	- Disable LODs so chams can work properly at a distance
- *	- Modify rendering order so that chams render on top(wallhacks!)
+ *	- Modify rendering order so that chams render on top(wallhacks!) ---- (over)done
  *	- Add some kind of aimbot/aim assist(ideally silent aim)
  */
 
@@ -288,6 +288,7 @@ void hooked_rendermodel(char *param_1,int param_2,int param_3,float param_4,vec 
 			float param_7,float param_8,float param_9,int param_10,playerent *param_11,
 			modelattach *param_12,float param_13) {
 	unhook(rendermodel);
+	glDepthFunc(GL_ALWAYS);
 	rendermodel(param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13);
 	hook(rendermodel, hooked_rendermodel);
 }
@@ -296,11 +297,6 @@ __attribute__((constructor))
 void initLib() {
 	hook(isoccluded, hooked_isoccluded);
 	hook(rendermodel, hooked_rendermodel);
-	unsigned char* nop_instruction = (unsigned char*)0x90000000;
-	void* patch = &nop_instruction;
-	void* addy = (void*)0x46ce45;
-	insertRTPatch(addy, patch, sizeof(*patch));
-		
 }
 
 __attribute__((destructor))
