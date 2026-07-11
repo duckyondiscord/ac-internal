@@ -61,7 +61,6 @@ SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) =
 // Hardcoded addresses cuz no PIE
 #define CLIENTLOGF_ADDR		0x44bf10
 #define ISOCCLUDED_ADDR		0x519b50
-#define RENDERMODEL_ADDR	0x49aa60
 #define RENDERCLIENT_ADDR	0x49b8f0
 
 // Internal game structs with unknown fields
@@ -72,15 +71,11 @@ typedef struct vec_t vec;
 // Pointer to internal game functions we want to use/hook
 typedef void (*clientlogf_t)(const char *format, ...);
 typedef int8_t (*isoccluded_t)(float param_1, float param_2, float param_3, float param_4, float param_5);
-typedef void (*rendermodel_t)(char *param_1, int param_2, int param_3, float param_4, vec *param_5, float param_6,
-			float param_7, float param_8, float param_9, int param_10, playerent *param_11,
-			modelattach *param_12, float param_13);
 typedef void (*renderclient_t)(playerent *param_1, char *param_2, char *param_3, int param_4);
 
 // Define internal game functions
 clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
 isoccluded_t isoccluded = (isoccluded_t)ISOCCLUDED_ADDR;
-rendermodel_t rendermodel = (rendermodel_t)RENDERMODEL_ADDR;
 renderclient_t renderclient = (renderclient_t)RENDERCLIENT_ADDR;
 
 #define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert or more, 14 bytes equates to a 64-bit long JMP
@@ -263,14 +258,6 @@ int8_t hooked_isoccluded(float param_1, float param_2, float param_3, float para
 	return 0; 
 }
 
-void hooked_rendermodel(char *param_1,int param_2,int param_3,float param_4,vec *param_5,float param_6,
-			float param_7,float param_8,float param_9,int param_10,playerent *param_11,
-			modelattach *param_12,float param_13) {
-	unhook(rendermodel, rendermodel_Prologue);
-	rendermodel(param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13);
-	hook(rendermodel, hooked_rendermodel, rendermodel_Prologue);
-}
-
 void hooked_renderclient(playerent *param_1, char *param_2,char *param_3,int param_4) {
 	unhook(renderclient, renderclient_Prologue);
 	real_glDepthFunc(GL_ALWAYS);
@@ -291,13 +278,11 @@ void initLib() {
 	// Hook internal functions
 	hook(renderclient, hooked_renderclient, renderclient_Prologue);
 	hook(isoccluded, hooked_isoccluded, isoccluded_Prologue);
-	hook(rendermodel, hooked_rendermodel, rendermodel_Prologue);
 }
 
 __attribute__((destructor))
 void exitLib() {
 	// Unhook everything even though idk if this is ever called
 	unhook(isoccluded, isoccluded_Prologue);
-	unhook(rendermodel, rendermodel_Prologue);
 	unhook(renderclient, renderclient_Prologue);
 }
