@@ -4,7 +4,7 @@
  *	- Disable LODs so chams can work properly at a distance
  *	- Modify rendering order so that chams render on top(wallhacks!) ---- (over)done
  *	- Add some kind of aimbot/aim assist(ideally silent aim)
- *	- Test on another PC just in case
+ *	- Test on another PC just in case ---- done, works
  */
 
 #define _GNU_SOURCE
@@ -25,17 +25,23 @@ typedef int GLsizei;
 typedef unsigned int GLuint;
 typedef unsigned char GLubyte;
 typedef bool GLboolean;
-#define GL_TEXTURE_2D 0x0DE1
-#define GL_RGB 0x1907
-#define GL_RGBA 0x1908
-#define GL_NEVER    0x0200
-#define GL_LESS     0x0201
-#define GL_EQUAL    0x0202
-#define GL_LEQUAL   0x0203
-#define GL_GREATER  0x0204
-#define GL_NOTEQUAL 0x0205
-#define GL_GEQUAL   0x0206
-#define GL_ALWAYS   0x0207
+#define GL_TEXTURE_2D		0x0DE1
+#define GL_RGB			0x1907
+#define GL_RGBA			0x1908
+#define GL_NEVER		0x0200
+#define GL_LESS			0x0201
+#define GL_EQUAL		0x0202
+#define GL_LEQUAL		0x0203
+#define GL_GREATER		0x0204
+#define GL_NOTEQUAL		0x0205
+#define GL_GEQUAL		0x0206
+#define GL_ALWAYS		0x0207
+#define GL_FRONT		0x0404
+#define GL_BACK			0x0405
+#define GL_FRONT_AND_BACK	0x0408
+#define GL_POINT		0x1B00
+#define GL_LINE			0x1B01
+#define GL_FILL			0x1B02
 
 // SDL Type Definitions
 typedef uint32_t Uint32;
@@ -47,14 +53,16 @@ SDL_Window *windowHandle = NULL;
 // Pointers to real OGL functions
 static void (*real_glTexImage2D)(GLenum, int, int, GLsizei, GLsizei, int, GLenum, GLenum, const void*) = NULL;
 void (*real_glDepthFunc)(GLenum) = NULL;
+void (*real_glPolygonMode)(GLenum, GLenum) = NULL;
 
 // Pointers to real SDL functions
 SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) = NULL;
 
 // Hardcoded addresses cuz no PIE
-#define CLIENTLOGF_ADDR 0x44bf10
-#define ISOCCLUDED_ADDR 0x519b50
-#define RENDERMODEL_ADDR 0x49aa60
+#define CLIENTLOGF_ADDR		0x44bf10
+#define ISOCCLUDED_ADDR		0x519b50
+#define RENDERMODEL_ADDR	0x49aa60
+#define RENDERCLIENT_ADDR	0x49b8f0
 
 // Internal game structs with unknown fields
 typedef struct playerent_t playerent;
@@ -67,11 +75,19 @@ typedef int8_t (*isoccluded_t)(float param_1, float param_2, float param_3, floa
 typedef void (*rendermodel_t)(char *param_1, int param_2, int param_3, float param_4, vec *param_5, float param_6,
 			float param_7, float param_8, float param_9, int param_10, playerent *param_11,
 			modelattach *param_12, float param_13);
+typedef void (*renderclient_t)(playerent *param_1, char *param_2, char *param_3, int param_4);
 
 // Define internal game functions
 clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
 isoccluded_t isoccluded = (isoccluded_t)ISOCCLUDED_ADDR;
 rendermodel_t rendermodel = (rendermodel_t)RENDERMODEL_ADDR;
+renderclient_t renderclient = (renderclient_t)RENDERCLIENT_ADDR;
+
+#define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert or more, 14 bytes equates to a 64-bit long JMP
+// Variables to hold function prologues for inline hooked functions
+unsigned char rendermodel_Prologue[SIZE_ORIG_BYTES];
+unsigned char renderclient_Prologue[SIZE_ORIG_BYTES];
+unsigned char isoccluded_Prologue[SIZE_ORIG_BYTES]; // Never used but I would feel horrible for not including this
 
 void *getPageAddr(void *addr) {
     return (void *)((uintptr_t)addr & ~(getpagesize() - 1));
@@ -97,10 +113,7 @@ bool insertRTPatch(void *location, void *patchCode, size_t patchSize) {
 }
 
 // Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work, licensed under MIT: https://raw.githubusercontent.com/eunomia-bpf/inline-hook-demo/refs/heads/main/LICENSE
-#define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert or more, 14 bytes equates to a 64-bit long JMP
 static void insertInlineHook(void *origFunc, void *hookFunc) {
-	// unsigned char *bytes = (unsigned char *)origFunc;
-
 	// Write a jump instruction at the start of the original function.
 	*((unsigned char *)origFunc + 0) = 0xFF;
 	*((unsigned char *)origFunc + 1) = 0x25;
@@ -113,11 +126,9 @@ static void insertInlineHook(void *origFunc, void *hookFunc) {
 	*(uint64_t *)((unsigned char *)origFunc + 6) = (uint64_t)hookFunc;
 }
 
-unsigned char origBytes[SIZE_ORIG_BYTES];
-
-void hook(void *origFunc, void *hookFunc) {
+void hook(void *origFunc, void *hookFunc, unsigned char origPrologue[SIZE_ORIG_BYTES]) {
     // Store the original bytes of the function.
-    memcpy(origBytes, origFunc, SIZE_ORIG_BYTES);
+    memcpy(origPrologue, origFunc, SIZE_ORIG_BYTES);
 
     // Make the memory page writable.
     mprotect(getPageAddr(origFunc), getpagesize(),
@@ -131,14 +142,14 @@ void hook(void *origFunc, void *hookFunc) {
          PROT_READ | PROT_EXEC);
 }
 
-void unhook(void *origFunc)
+void unhook(void *origFunc, unsigned char origPrologue[SIZE_ORIG_BYTES])
 {
     // Make the memory page writable.
     mprotect(getPageAddr(origFunc), getpagesize(),
          PROT_READ | PROT_WRITE | PROT_EXEC);
 
     // Restore the original bytes of the function.
-    memcpy(origFunc, origBytes, SIZE_ORIG_BYTES);
+    memcpy(origFunc, origPrologue, SIZE_ORIG_BYTES);
 
     // Make the memory page executable only.
     mprotect(getPageAddr(origFunc), getpagesize(),
@@ -179,25 +190,10 @@ bool checkIfEnemy(const void *pixels, GLsizei width, GLsizei height, GLenum form
 	return false;
 }	
 
-// Hopefully these will be useful for drawing players over everything
-void glDepthFunc(GLenum func) {
-	if(!real_glDepthFunc) {
-		real_glDepthFunc = dlsym(RTLD_NEXT, "glDepthFunc");
-	}
-	if(real_glDepthFunc) {
-		real_glDepthFunc(func);
-	}
-}
-
 // Hooked OGL function
 void glTexImage2D(GLenum target, int level, int internalformat,
                   GLsizei width, GLsizei height, int border,
                   GLenum format, GLenum type, const void *pixels) {
-
-	// Get real function pointer
-	if(!real_glTexImage2D) {
-		real_glTexImage2D = dlsym(RTLD_NEXT, "glTexImage2D");
-	}
 	
 	if (target == GL_TEXTURE_2D && level == 0 && pixels) {
 		if(checkIfEnemy(pixels, width, height, format)) {
@@ -216,7 +212,7 @@ void glTexImage2D(GLenum target, int level, int internalformat,
 				unsigned char alpha = 255;
 
 				unsigned char *coloredPixels = malloc(size);
-				if (coloredPixels) {
+				if(coloredPixels) {
 					// Loop through every pixel and set it to the desired color
 					for(size_t i = 0;i < totalPixels;i++) {
 						size_t offset = i * bpp;
@@ -270,20 +266,38 @@ int8_t hooked_isoccluded(float param_1, float param_2, float param_3, float para
 void hooked_rendermodel(char *param_1,int param_2,int param_3,float param_4,vec *param_5,float param_6,
 			float param_7,float param_8,float param_9,int param_10,playerent *param_11,
 			modelattach *param_12,float param_13) {
-	unhook(rendermodel);
-	glDepthFunc(GL_ALWAYS);
+	unhook(rendermodel, rendermodel_Prologue);
 	rendermodel(param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13);
-	hook(rendermodel, hooked_rendermodel);
+	hook(rendermodel, hooked_rendermodel, rendermodel_Prologue);
+}
+
+void hooked_renderclient(playerent *param_1, char *param_2,char *param_3,int param_4) {
+	unhook(renderclient, renderclient_Prologue);
+	real_glDepthFunc(GL_ALWAYS);
+	
+	renderclient(param_1, param_2, param_3, param_4);
+	
+	hook(renderclient, hooked_renderclient, renderclient_Prologue);
 }
 
 __attribute__((constructor))
 void initLib() {
-	hook(isoccluded, hooked_isoccluded);
-	hook(rendermodel, hooked_rendermodel);
+	// Initialize everything so that nothing points to NULL
+	real_glPolygonMode = dlsym(RTLD_NEXT, "glPolygonMode");
+	real_glDepthFunc = dlsym(RTLD_NEXT, "glDepthFunc");
+	real_glTexImage2D = dlsym(RTLD_NEXT, "glTexImage2D");
+	real_SDL_CreateWindow = dlsym(RTLD_NEXT, "SDL_CreateWindow");
+	
+	// Hook internal functions
+	hook(renderclient, hooked_renderclient, renderclient_Prologue);
+	hook(isoccluded, hooked_isoccluded, isoccluded_Prologue);
+	hook(rendermodel, hooked_rendermodel, rendermodel_Prologue);
 }
 
 __attribute__((destructor))
 void exitLib() {
-	unhook(isoccluded);
-	unhook(rendermodel);
+	// Unhook everything even though idk if this is ever called
+	unhook(isoccluded, isoccluded_Prologue);
+	unhook(rendermodel, rendermodel_Prologue);
+	unhook(renderclient, renderclient_Prologue);
 }
