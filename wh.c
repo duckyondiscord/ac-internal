@@ -4,6 +4,7 @@
  *	- Disable LODs so chams can work properly at a distance
  *	- Modify rendering order so that chams render on top(wallhacks!) ---- (over)done
  *	- Add some kind of aimbot/aim assist(ideally silent aim)
+ *	- Test on another PC just in case
  */
 
 #define _GNU_SOURCE
@@ -46,7 +47,6 @@ SDL_Window *windowHandle = NULL;
 // Pointers to real OGL functions
 static void (*real_glTexImage2D)(GLenum, int, int, GLsizei, GLsizei, int, GLenum, GLenum, const void*) = NULL;
 void (*real_glDepthFunc)(GLenum) = NULL;
-void (*real_glDepthMask)(GLboolean flag);
 
 // Pointers to real SDL functions
 SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) = NULL;
@@ -69,7 +69,6 @@ typedef void (*rendermodel_t)(char *param_1, int param_2, int param_3, float par
 			modelattach *param_12, float param_13);
 
 // Define internal game functions
-// Hardcoded addresses cuz no PIE
 clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
 isoccluded_t isoccluded = (isoccluded_t)ISOCCLUDED_ADDR;
 rendermodel_t rendermodel = (rendermodel_t)RENDERMODEL_ADDR;
@@ -89,8 +88,6 @@ bool insertRTPatch(void *location, void *patchCode, size_t patchSize) {
 
 	// Make location page only executable/readable again
 	mprotect(getPageAddr(location), getpagesize(), PROT_READ | PROT_EXEC);
-	unsigned char *bytes = (unsigned char *)location;
-	printf("First byte of overwritten location: %02x (should be 0x90)", bytes[0]);
 
 	if (memcmp(location, patchCode, patchSize) == 0) {
 		return true;
@@ -99,8 +96,8 @@ bool insertRTPatch(void *location, void *patchCode, size_t patchSize) {
 	return false;
 }
 
-// Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work
-#define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert, 14 bytes equates to a 64-bit long JMP
+// Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work, licensed under MIT: https://raw.githubusercontent.com/eunomia-bpf/inline-hook-demo/refs/heads/main/LICENSE
+#define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert or more, 14 bytes equates to a 64-bit long JMP
 static void insertInlineHook(void *origFunc, void *hookFunc) {
 	// unsigned char *bytes = (unsigned char *)origFunc;
 
@@ -173,7 +170,7 @@ bool checkIfEnemy(const void *pixels, GLsizei width, GLsizei height, GLenum form
 	
 	uint32_t textureHash = calculate_fnv1a(pixels, pixelDataSize);
 
-	for(int i = 0;i < sizeof(enemyTextures) / sizeof(enemyTextures[1]);i++) {
+	for(int i = 0;i < sizeof(enemyTextures) / sizeof(enemyTextures[0]);i++) {
 		if(enemyTextures[i] == textureHash) {
 			clientlogf("[GL HOOK] Enemy is rendered on screen!");
 			return true;
@@ -188,21 +185,7 @@ void glDepthFunc(GLenum func) {
 		real_glDepthFunc = dlsym(RTLD_NEXT, "glDepthFunc");
 	}
 	if(real_glDepthFunc) {
-		/*if(func == 513) {
-			real_glDepthFunc(GL_ALWAYS);
-		}
-		else { */
-			real_glDepthFunc(func);
-		//}
-	}
-}
-
-void glDepthMask(GLboolean flag) {
-	if(!real_glDepthMask) {
-		real_glDepthMask = dlsym(RTLD_NEXT, "glDepthMask");
-	}
-	if(real_glDepthMask) {
-		real_glDepthMask(flag);
+		real_glDepthFunc(func);
 	}
 }
 
