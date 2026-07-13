@@ -110,15 +110,10 @@ void glTexImage2D(GLenum target, int level, int internalformat,
 
 // Hooked SDL function to grab window handle for imgui later
 SDL_Window *SDL_CreateWindow(const char* title, int x, int y, int w, int h, Uint32 flags) {
-	// Grab real function
-	if(!real_SDL_CreateWindow) {
-		real_SDL_CreateWindow = dlsym(RTLD_NEXT, "SDL_CreateWindow");
-	}
+	// Print window title and save the returned handle
 	clientlogf("[SDL Hook] Window title: %s", title);
-	if(real_SDL_CreateWindow) {
-		windowHandle = real_SDL_CreateWindow(title, x, y, w, h, flags);
-		return windowHandle;
-	}
+	windowHandle = real_SDL_CreateWindow(title, x, y, w, h, flags);
+	return windowHandle;
 }
 
 // Hooked internal funcs
