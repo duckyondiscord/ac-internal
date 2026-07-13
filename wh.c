@@ -5,6 +5,7 @@
  *	- Modify rendering order so that chams render on top(wallhacks!) ---- (over)done
  *	- Add some kind of aimbot/aim assist(ideally silent aim)
  *	- Test on another PC just in case ---- done, works
+ *	- Rainbow chams??
  */
 
 #define _GNU_SOURCE
@@ -17,140 +18,8 @@
 #include <stdint.h>
 #include <sys/mman.h>
 #include <assert.h>
-
-
-// OpenGL Type Definitions
-typedef unsigned int GLenum;
-typedef int GLsizei;
-typedef unsigned int GLuint;
-typedef unsigned char GLubyte;
-typedef bool GLboolean;
-#define GL_TEXTURE_2D		0x0DE1
-#define GL_RGB			0x1907
-#define GL_RGBA			0x1908
-#define GL_NEVER		0x0200
-#define GL_LESS			0x0201
-#define GL_EQUAL		0x0202
-#define GL_LEQUAL		0x0203
-#define GL_GREATER		0x0204
-#define GL_NOTEQUAL		0x0205
-#define GL_GEQUAL		0x0206
-#define GL_ALWAYS		0x0207
-#define GL_FRONT		0x0404
-#define GL_BACK			0x0405
-#define GL_FRONT_AND_BACK	0x0408
-#define GL_POINT		0x1B00
-#define GL_LINE			0x1B01
-#define GL_FILL			0x1B02
-
-// SDL Type Definitions
-typedef uint32_t Uint32;
-typedef struct SDL_Window SDL_Window;
-
-// Define window handle that we want to maintain
-SDL_Window *windowHandle = NULL;
-
-// Pointers to real OGL functions
-static void (*real_glTexImage2D)(GLenum, int, int, GLsizei, GLsizei, int, GLenum, GLenum, const void*) = NULL;
-void (*real_glDepthFunc)(GLenum) = NULL;
-void (*real_glPolygonMode)(GLenum, GLenum) = NULL;
-
-// Pointers to real SDL functions
-SDL_Window * (*real_SDL_CreateWindow)(const char*, int, int, int, int, Uint32) = NULL;
-
-// Hardcoded addresses cuz no PIE
-#define CLIENTLOGF_ADDR		0x44bf10
-#define ISOCCLUDED_ADDR		0x519b50
-#define RENDERCLIENT_ADDR	0x49b8f0
-
-// Internal game structs with unknown fields
-typedef struct playerent_t playerent;
-typedef struct modelattach_t modelattach;
-typedef struct vec_t vec;
-
-// Pointer to internal game functions we want to use/hook
-typedef void (*clientlogf_t)(const char *format, ...);
-typedef int8_t (*isoccluded_t)(float param_1, float param_2, float param_3, float param_4, float param_5);
-typedef void (*renderclient_t)(playerent *param_1, char *param_2, char *param_3, int param_4);
-
-// Define internal game functions
-clientlogf_t clientlogf = (clientlogf_t)CLIENTLOGF_ADDR;
-isoccluded_t isoccluded = (isoccluded_t)ISOCCLUDED_ADDR;
-renderclient_t renderclient = (renderclient_t)RENDERCLIENT_ADDR;
-
-#define SIZE_ORIG_BYTES 14 // This needs to be the size of the instruction we want to insert or more, 14 bytes equates to a 64-bit long JMP
-// Variables to hold function prologues for inline hooked functions
-unsigned char rendermodel_Prologue[SIZE_ORIG_BYTES];
-unsigned char renderclient_Prologue[SIZE_ORIG_BYTES];
-unsigned char isoccluded_Prologue[SIZE_ORIG_BYTES]; // Never used but I would feel horrible for not including this
-
-void *getPageAddr(void *addr) {
-    return (void *)((uintptr_t)addr & ~(getpagesize() - 1));
-}
-
-// Runtime patcher, similar to inline hooking code, avoids the need for a patched game binary
-// Also useful for making rust nerds flinch
-bool insertRTPatch(void *location, void *patchCode, size_t patchSize) {
-	// Make location page writable
-	mprotect(getPageAddr(location), getpagesize(), PROT_READ | PROT_WRITE | PROT_EXEC);
-
-	// Write patchCode to location
-	memcpy(location, patchCode, patchSize);
-
-	// Make location page only executable/readable again
-	mprotect(getPageAddr(location), getpagesize(), PROT_READ | PROT_EXEC);
-
-	if (memcmp(location, patchCode, patchSize) == 0) {
-		return true;
-	}
-
-	return false;
-}
-
-// Inline hooking code taken from https://eunomia.dev/blogs/inline-hook/ and modified slightly with the help of gemini to work, licensed under MIT: https://raw.githubusercontent.com/eunomia-bpf/inline-hook-demo/refs/heads/main/LICENSE
-static void insertInlineHook(void *origFunc, void *hookFunc) {
-	// Write a jump instruction at the start of the original function.
-	*((unsigned char *)origFunc + 0) = 0xFF;
-	*((unsigned char *)origFunc + 1) = 0x25;
-	*((unsigned char *)origFunc + 2) = 0x00;
-	*((unsigned char *)origFunc + 3) = 0x00;
-	*((unsigned char *)origFunc + 4) = 0x00;
-	*((unsigned char *)origFunc + 5) = 0x00;
-
-	// Write the hook function address to the jump target
-	*(uint64_t *)((unsigned char *)origFunc + 6) = (uint64_t)hookFunc;
-}
-
-void hook(void *origFunc, void *hookFunc, unsigned char origPrologue[SIZE_ORIG_BYTES]) {
-    // Store the original bytes of the function.
-    memcpy(origPrologue, origFunc, SIZE_ORIG_BYTES);
-
-    // Make the memory page writable.
-    mprotect(getPageAddr(origFunc), getpagesize(),
-         PROT_READ | PROT_WRITE | PROT_EXEC);
-
-    // As the function name describes, insert the inline hook
-    insertInlineHook(origFunc, hookFunc);
-
-    // Make the memory page executable only.
-    mprotect(getPageAddr(origFunc), getpagesize(),
-         PROT_READ | PROT_EXEC);
-}
-
-void unhook(void *origFunc, unsigned char origPrologue[SIZE_ORIG_BYTES])
-{
-    // Make the memory page writable.
-    mprotect(getPageAddr(origFunc), getpagesize(),
-         PROT_READ | PROT_WRITE | PROT_EXEC);
-
-    // Restore the original bytes of the function.
-    memcpy(origFunc, origPrologue, SIZE_ORIG_BYTES);
-
-    // Make the memory page executable only.
-    mprotect(getPageAddr(origFunc), getpagesize(),
-         PROT_READ | PROT_EXEC);
-}
-// End of inline hooking code
+#include "primitives/defs.h"
+#include "primitives/hook.h"
 
 // Calculate texture hash
 uint32_t calculate_fnv1a(const void* data, size_t size) {
@@ -190,28 +59,30 @@ void glTexImage2D(GLenum target, int level, int internalformat,
                   GLsizei width, GLsizei height, int border,
                   GLenum format, GLenum type, const void *pixels) {
 	
+	
 	if (target == GL_TEXTURE_2D && level == 0 && pixels) {
 		if(checkIfEnemy(pixels, width, height, format)) {
 			int bpp = 0;
 			if (format == GL_RGB) bpp = 3;
 			else if (format == GL_RGBA) bpp = 4;
 			else return;
-			
+
 			if (bpp != 0) {
 				size_t size = (size_t)width * height * bpp;
 				size_t totalPixels = (size_t)width * height;
 				
+				// Initialize colors
 				unsigned char red = 255;
 				unsigned char green = 255;
 				unsigned char blue = 0;
-				unsigned char alpha = 255;
+				unsigned char alpha = 0;
 
 				unsigned char *coloredPixels = malloc(size);
 				if(coloredPixels) {
 					// Loop through every pixel and set it to the desired color
 					for(size_t i = 0;i < totalPixels;i++) {
 						size_t offset = i * bpp;
-
+						
 						coloredPixels[offset + 0] = red;
 						coloredPixels[offset + 1] = green;
 						coloredPixels[offset + 2] = blue;
@@ -274,7 +145,7 @@ void initLib() {
 	real_glDepthFunc = dlsym(RTLD_NEXT, "glDepthFunc");
 	real_glTexImage2D = dlsym(RTLD_NEXT, "glTexImage2D");
 	real_SDL_CreateWindow = dlsym(RTLD_NEXT, "SDL_CreateWindow");
-	
+
 	// Hook internal functions
 	hook(renderclient, hooked_renderclient, renderclient_Prologue);
 	hook(isoccluded, hooked_isoccluded, isoccluded_Prologue);
