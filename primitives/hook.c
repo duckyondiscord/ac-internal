@@ -1,8 +1,11 @@
+/*
+ *	Hopefully reusable inline hooking code for other internal cheats.
+ */
+
+
 #include <sys/mman.h>
 #include <string.h>
 #include "hook.h"
-
-
 
 void *getPageAddr(void *addr) {
     return (void *)((uintptr_t)addr & ~(getpagesize() - 1));
