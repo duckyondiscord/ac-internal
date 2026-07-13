@@ -104,8 +104,7 @@ void glTexImage2D(GLenum target, int level, int internalformat,
 		}
 	}
 
-	if(real_glTexImage2D)
-		real_glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
+	real_glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
 }
 
 // Hooked SDL function to grab window handle for imgui later

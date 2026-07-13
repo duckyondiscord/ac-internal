@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 #include <string.h>
 #include "hook.h"
+#include <stdint.h>
+#include <unistd.h>
 
 void *getPageAddr(void *addr) {
     return (void *)((uintptr_t)addr & ~(getpagesize() - 1));
